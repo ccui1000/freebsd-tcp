@@ -1,0 +1,89 @@
+diff --git a/sys/netinet/cc/cc_cubic.c b/sys/netinet/cc/cc_cubic.c
+index 89e35f8..8e25c46 100644
+--- a/sys/netinet/cc/cc_cubic.c
++++ b/sys/netinet/cc/cc_cubic.c
+@@ -94,8 +94,8 @@
+ 	int		mean_rtt_ticks;
+ 	/* ACKs since last congestion event. */
+ 	int		epoch_ack_count;
+-	/* Time of last congestion event in ticks. */
+-	int		t_last_cong;
++	/* Beginning of an epoch in ticks. */
++	int		t_epoch_start;
+ };
+ 
+ static MALLOC_DEFINE(M_CUBIC, "cubic data",
+@@ -117,7 +117,7 @@
+ {
+ 	struct cubic *cubic_data;
+ 	unsigned long w_tf, w_cubic_next;
+-	int ticks_since_cong;
++	int ticks_since_start;
+ 
+ 	cubic_data = ccv->cc_data;
+ 	cubic_record_rtt(ccv);
+@@ -133,10 +133,12 @@
+ 	    (V_tcp_do_rfc3465 && ccv->flags & CCF_ABC_SENTAWND))) {
+ 		 /* Use the logic in NewReno ack_received() for slow start. */
+ 		if (CCV(ccv, snd_cwnd) <= CCV(ccv, snd_ssthresh) ||
+-		    cubic_data->min_rtt_ticks == TCPTV_SRTTBASE)
++		    cubic_data->min_rtt_ticks == TCPTV_SRTTBASE) {
++			cubic_data->t_epoch_start = ticks;
+ 			newreno_cc_algo.ack_received(ccv, type);
++		}
+ 		else {
+-			ticks_since_cong = ticks - cubic_data->t_last_cong;
++			ticks_since_start = ticks - cubic_data->t_epoch_start;
+ 
+ 			/*
+ 			 * The mean RTT is used to best reflect the equations in
+@@ -145,11 +147,11 @@
+ 			 * RTT is dominated by network buffering rather than
+ 			 * propagation delay.
+ 			 */
+-			w_tf = tf_cwnd(ticks_since_cong,
++			w_tf = tf_cwnd(ticks_since_start,
+ 			    cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
+ 			    CCV(ccv, t_maxseg));
+ 
+-			w_cubic_next = cubic_cwnd(ticks_since_cong +
++			w_cubic_next = cubic_cwnd(ticks_since_start +
+ 			    cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
+ 			    CCV(ccv, t_maxseg), cubic_data->K);
+ 
+@@ -209,7 +211,7 @@
+ 		return (ENOMEM);
+ 
+ 	/* Init some key variables with sensible defaults. */
+-	cubic_data->t_last_cong = ticks;
++	cubic_data->t_epoch_start = ticks;
+ 	cubic_data->min_rtt_ticks = TCPTV_SRTTBASE;
+ 	cubic_data->mean_rtt_ticks = 1;
+ 
+@@ -247,7 +249,7 @@
+ 			cubic_data->num_cong_events++;
+ 			cubic_data->prev_max_cwnd = cubic_data->max_cwnd;
+ 			cubic_data->max_cwnd = CCV(ccv, snd_cwnd);
+-			cubic_data->t_last_cong = ticks;
++			cubic_data->t_epoch_start = ticks;
+ 			CCV(ccv, snd_cwnd) = CCV(ccv, snd_ssthresh);
+ 			ENTER_CONGRECOVERY(CCV(ccv, t_flags));
+ 		}
+@@ -263,7 +265,7 @@
+ 		 */
+ 		if (CCV(ccv, t_rxtshift) >= 2) {
+ 			cubic_data->num_cong_events++;
+-			cubic_data->t_last_cong = ticks;
++			cubic_data->t_epoch_start = ticks;
+ 		}
+ 		break;
+ 	}
+@@ -330,7 +332,7 @@
+ 			CCV(ccv, snd_cwnd) = max(1, ((CUBIC_BETA *
+ 			    cubic_data->max_cwnd) >> CUBIC_SHIFT));
+ 	}
+-	cubic_data->t_last_cong = ticks;
++	cubic_data->t_epoch_start = ticks;
+ 
+ 	/* Calculate the average RTT between congestion epochs. */
+ 	if (cubic_data->epoch_ack_count > 0 &&
