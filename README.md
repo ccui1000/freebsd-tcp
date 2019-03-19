@@ -1,1 +1,3 @@
-# freebsd_tcp_cc_cubic
+# freebsd/tcp
+
+Studies about TCP implementation in detail from the open source FreeBSD project.
